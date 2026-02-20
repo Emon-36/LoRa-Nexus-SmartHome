@@ -8,10 +8,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Home
@@ -56,7 +58,7 @@ fun MainScreen(modifier: Modifier = Modifier) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    Navdraw(drawerState = drawerState) {
+    Navdraw(modifier = Modifier.fillMaxSize(),drawerState = drawerState) {
         Column(modifier = modifier.fillMaxSize()) {
             Row(modifier = Modifier.fillMaxWidth().height(150.dp)) {
                 Appbar(modifier = Modifier.fillMaxSize(),onMenuClick = {
@@ -95,13 +97,19 @@ fun Appbar(modifier: Modifier = Modifier, onMenuClick: () -> Unit) {
 }
 
 @Composable
-fun Navdraw(drawerState: DrawerState, content: @Composable () -> Unit) {
+fun Navdraw(modifier: Modifier=Modifier, drawerState: DrawerState, content: @Composable () -> Unit) {
     val scope = rememberCoroutineScope()
     ModalNavigationDrawer(
+        modifier = modifier.fillMaxSize(),
         drawerState = drawerState,
         drawerContent = {
-            ModalDrawerSheet {
-                Text("Smart Home", style = MaterialTheme.typography.titleLarge)
+            ModalDrawerSheet(
+                modifier = Modifier.fillMaxHeight().width(250.dp),
+                drawerContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                drawerContentColor = MaterialTheme.colorScheme.primary,
+
+            ) {
+                Text("   Smart Home", style = MaterialTheme.typography.titleLarge)
                 HorizontalDivider()
                 NavigationDrawerItem(
                     label = { Text("Home") },
