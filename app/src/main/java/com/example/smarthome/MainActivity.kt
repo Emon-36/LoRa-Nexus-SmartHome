@@ -123,7 +123,7 @@ fun Appbar(onMenuClick: () -> Unit) {
             }
         },
         actions = {
-            IconButton(onClick = { /* TODO: Profile */ }) {
+            IconButton(onClick = { /* Profile click */ }) {
                 Icon(imageVector = Icons.Default.AccountCircle, contentDescription = "Account")
             }
         },
@@ -149,7 +149,11 @@ fun Navdraw(
                 drawerContainerColor = MaterialTheme.colorScheme.primaryContainer,
                 drawerContentColor = MaterialTheme.colorScheme.primary,
             ) {
-                Text("   Smart Home", modifier = Modifier.padding(vertical = 16.dp), style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "   Smart Home",
+                    modifier = Modifier.padding(vertical = 16.dp),
+                    style = MaterialTheme.typography.titleLarge
+                )
                 HorizontalDivider()
                 NavigationDrawerItem(
                     label = { Text("Home") },
