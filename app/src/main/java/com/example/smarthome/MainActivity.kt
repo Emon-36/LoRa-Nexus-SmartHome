@@ -30,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
@@ -38,6 +39,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import com.example.smarthome.ui.theme.SmartHomeTheme
 import kotlinx.coroutines.launch
 
@@ -54,18 +58,52 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MainScreen(modifier: Modifier = Modifier) {
+fun MainScreen() {
+    val navController = rememberNavController()
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    Navdraw(modifier = Modifier.fillMaxSize(),drawerState = drawerState) {
-        Column(modifier = modifier.fillMaxSize()) {
-            Row(modifier = Modifier.fillMaxWidth().height(150.dp)) {
-                Appbar(modifier = Modifier.fillMaxSize(),onMenuClick = {
+    NavHost(navController = navController, startDestination = "home") {
+        composable("home") {
+            Navdraw(
+                drawerState = drawerState,
+                onHomeClick = {
+                    scope.launch { drawerState.close() }
+                },
+                onSettingsClick = {
                     scope.launch {
-                        drawerState.open()
+                        drawerState.close()
+                        navController.navigate("settings")
                     }
+                }
+            ) {
+                HomeScreen(onMenuClick = {
+                    scope.launch { drawerState.open() }
                 })
+            }
+        }
+        composable("settings") {
+            SettingsScreen(onBackClick = {
+                navController.popBackStack()
+            })
+        }
+    }
+}
+
+@Composable
+fun HomeScreen(onMenuClick: () -> Unit) {
+    Scaffold(
+        topBar = {
+            Appbar(onMenuClick = onMenuClick)
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .padding(innerPadding)
+                .fillMaxSize()
+        ) {
+            Row(modifier = Modifier.fillMaxWidth().height(150.dp)) {
+                Box(modifier = Modifier.fillMaxSize().background(color = Color.Gray))
             }
             Row(modifier = Modifier.fillMaxWidth().height(20.dp)) {
                 Box(modifier = Modifier.fillMaxWidth().height(20.dp).background(color = Color.Cyan))
@@ -76,7 +114,7 @@ fun MainScreen(modifier: Modifier = Modifier) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Appbar(modifier: Modifier = Modifier, onMenuClick: () -> Unit) {
+fun Appbar(onMenuClick: () -> Unit) {
     CenterAlignedTopAppBar(
         title = { Text("Smart Home") },
         navigationIcon = {
@@ -85,7 +123,7 @@ fun Appbar(modifier: Modifier = Modifier, onMenuClick: () -> Unit) {
             }
         },
         actions = {
-            IconButton(onClick = { }) {
+            IconButton(onClick = { /* TODO: Profile */ }) {
                 Icon(imageVector = Icons.Default.AccountCircle, contentDescription = "Account")
             }
         },
@@ -97,34 +135,32 @@ fun Appbar(modifier: Modifier = Modifier, onMenuClick: () -> Unit) {
 }
 
 @Composable
-fun Navdraw(modifier: Modifier=Modifier, drawerState: DrawerState, content: @Composable () -> Unit) {
-    val scope = rememberCoroutineScope()
+fun Navdraw(
+    drawerState: DrawerState,
+    onHomeClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+    content: @Composable () -> Unit
+) {
     ModalNavigationDrawer(
-        modifier = modifier.fillMaxSize(),
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet(
                 modifier = Modifier.fillMaxHeight().width(250.dp),
                 drawerContainerColor = MaterialTheme.colorScheme.primaryContainer,
                 drawerContentColor = MaterialTheme.colorScheme.primary,
-
             ) {
-                Text("   Smart Home", style = MaterialTheme.typography.titleLarge)
+                Text("   Smart Home", modifier = Modifier.padding(vertical = 16.dp), style = MaterialTheme.typography.titleLarge)
                 HorizontalDivider()
                 NavigationDrawerItem(
                     label = { Text("Home") },
                     selected = false,
-                    onClick = {
-                        scope.launch { drawerState.close() }
-                    },
+                    onClick = onHomeClick,
                     icon = { Icon(Icons.Default.Home, contentDescription = null) }
                 )
                 NavigationDrawerItem(
                     label = { Text("Settings") },
                     selected = false,
-                    onClick = {
-                        scope.launch { drawerState.close() }
-                    },
+                    onClick = onSettingsClick,
                     icon = { Icon(Icons.Default.Settings, contentDescription = null) }
                 )
             }
