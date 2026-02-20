@@ -85,7 +85,7 @@ fun Appbar(modifier: Modifier = Modifier, onMenuClick: () -> Unit) {
             }
         },
         actions = {
-            IconButton(onClick = { /* TODO: Profile */ }) {
+            IconButton(onClick = { }) {
                 Icon(imageVector = Icons.Default.AccountCircle, contentDescription = "Account")
             }
         },
