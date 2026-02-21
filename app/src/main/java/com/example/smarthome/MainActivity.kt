@@ -106,6 +106,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.smarthome.ui.theme.SmartHomeTheme
+import com.google.firebase.database.FirebaseDatabase
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -146,7 +147,7 @@ data class UsageStats(
 // Persistence Helper
 object RoomPreferences {
     private const val PREFS_NAME = "smart_home_prefs"
-    private const val ROOMS_KEY = "custom_rooms_v2" // Versioned key for new data structure
+    private const val ROOMS_KEY = "custom_rooms_v2"
 
     fun saveRooms(context: Context, rooms: List<RoomStatus>) {
         val sharedPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -214,7 +215,15 @@ fun MainScreen() {
                 HomeScreen(
                     onMenuClick = { scope.launch { drawerState.open() } },
                     onAddRoom = { name, devices, color ->
-                        customRooms.add(RoomStatus(name, 0, 0, "Newly added room", devices, color))
+                        val newRoom = RoomStatus(name, 0, 0, "Newly added room", devices, color)
+                        customRooms.add(newRoom)
+                        
+                        // Initialize room and devices in Firebase
+                        val database = FirebaseDatabase.getInstance("https://smarthome-b527c-default-rtdb.asia-southeast1.firebasedatabase.app")
+                        val roomRef = database.getReference(name)
+                        devices.forEach { device ->
+                            roomRef.child(device.name).setValue(0)
+                        }
                     }
                 )
             }
@@ -230,6 +239,10 @@ fun MainScreen() {
                     room = room,
                     onBackClick = { navController.popBackStack() },
                     onDeleteRoom = {
+                        // Remove room from Firebase
+                        val database = FirebaseDatabase.getInstance("https://smarthome-b527c-default-rtdb.asia-southeast1.firebasedatabase.app")
+                        database.getReference(room.name).removeValue()
+                        
                         customRooms.remove(room)
                         RoomPreferences.saveRooms(context, customRooms)
                         navController.popBackStack()
@@ -318,7 +331,7 @@ fun HomeScreen(onMenuClick: () -> Unit, onAddRoom: (String, List<DeviceInfo>, Co
 @Composable
 fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color) -> Unit) {
     var roomName by remember { mutableStateOf("") }
-    val devices = remember { mutableStateListOf(mutableStateOf(""), mutableStateOf(""), mutableStateOf("")) }
+    val deviceNames = remember { mutableStateListOf(mutableStateOf(""), mutableStateOf(""), mutableStateOf("")) }
     val deviceTypes = remember { mutableStateListOf("Bulb", "Bulb", "Bulb") }
     
     val professionalColors = listOf(
@@ -327,7 +340,7 @@ fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color
     )
     var selectedColor by remember { mutableStateOf(professionalColors[0]) }
 
-    val typeOptions = listOf("Bulb", "Fan", "AC", "TV", "Others")
+    val typeOptions = listOf("Bulb", "Fan", "Heater", "Others")
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -340,7 +353,7 @@ fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color
                 OutlinedTextField(
                     value = roomName,
                     onValueChange = { roomName = it },
-                    label = { Text("Room Name") },
+                    label = { Text("Room Name (e.g., BedRoom)") },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 )
@@ -354,23 +367,22 @@ fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(color)
                                 .clickable { selectedColor = color }
-                                .border(
-                                    width = if (selectedColor == color) 2.dp else 0.dp,
-                                    color = if (selectedColor == color) Color.Black else Color.Transparent,
-                                    shape = RoundedCornerShape(4.dp)
-                                )
+                                .let { 
+                                    if (selectedColor == color) it.background(color, RoundedCornerShape(4.dp)).padding(2.dp).background(Color.White, RoundedCornerShape(4.dp)).padding(2.dp).background(color, RoundedCornerShape(4.dp))
+                                    else it
+                                }
                         )
                     }
                 }
                 HorizontalDivider()
                 Text("Device Config:", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
                 
-                devices.forEachIndexed { index, nameState ->
+                deviceNames.forEachIndexed { index, nameState ->
                     Column(modifier = Modifier.fillMaxWidth().border(1.dp, Color.LightGray, RoundedCornerShape(8.dp)).padding(8.dp)) {
                         OutlinedTextField(
                             value = nameState.value,
                             onValueChange = { nameState.value = it },
-                            label = { Text("Device ${index + 1} Name") },
+                            label = { Text("Device Name (e.g., Fan)") },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
                         )
@@ -408,7 +420,7 @@ fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color
                 }
                 
                 IconButton(onClick = { 
-                    devices.add(mutableStateOf(""))
+                    deviceNames.add(mutableStateOf(""))
                     deviceTypes.add("Bulb")
                 }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                     Icon(Icons.Default.Add, contentDescription = "Add device", tint = MaterialTheme.colorScheme.primary)
@@ -418,7 +430,7 @@ fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color
         confirmButton = {
             Button(onClick = { 
                 if (roomName.isNotBlank()) {
-                    val finalDevices = devices.mapIndexedNotNull { i, state ->
+                    val finalDevices = deviceNames.mapIndexedNotNull { i, state ->
                         if (state.value.isNotBlank()) DeviceInfo(state.value, deviceTypes[i]) else null
                     }
                     onAdd(roomName, finalDevices, selectedColor) 
@@ -501,13 +513,17 @@ fun DynamicRoomScreen(room: RoomStatus, onBackClick: () -> Unit, onDeleteRoom: (
                         }
                         
                         Spacer(modifier = Modifier.height(8.dp))
-                        TextButton(
-                            onClick = { showDeleteConfirm = true },
-                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        Surface(
+                            modifier = Modifier.clickable { showDeleteConfirm = true },
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.2f))
                         ) {
-                            Icon(Icons.Default.Delete, null, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Delete Room", style = MaterialTheme.typography.labelSmall)
+                            Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Delete Room", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                 }
@@ -519,7 +535,7 @@ fun DynamicRoomScreen(room: RoomStatus, onBackClick: () -> Unit, onDeleteRoom: (
 
             LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(room.devices) { device ->
-                    DeviceControlCard(device = device, roomColor = room.color)
+                    DeviceControlCard(roomName = room.name, device = device, roomColor = room.color)
                 }
             }
         }
@@ -527,13 +543,17 @@ fun DynamicRoomScreen(room: RoomStatus, onBackClick: () -> Unit, onDeleteRoom: (
 }
 
 @Composable
-fun DeviceControlCard(device: DeviceInfo, roomColor: Color) {
+fun DeviceControlCard(roomName: String, device: DeviceInfo, roomColor: Color) {
     var isActive by remember { mutableStateOf(false) }
     var fanSpeed by remember { mutableFloatStateOf(0f) }
     
+    val database = FirebaseDatabase.getInstance("https://smarthome-b527c-default-rtdb.asia-southeast1.firebasedatabase.app")
+    val deviceRef = database.getReference(roomName).child(device.name)
+
     val icon = when (device.type) {
         "Bulb" -> Icons.Default.Lightbulb
         "Fan" -> Icons.Default.Air
+        "Heater" -> Icons.Default.Bolt // Using Bolt for heater as representative
         "AC" -> Icons.Default.AcUnit
         "TV" -> Icons.Default.Tv
         else -> Icons.Default.Devices
@@ -553,11 +573,11 @@ fun DeviceControlCard(device: DeviceInfo, roomColor: Color) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
                         shape = RoundedCornerShape(12.dp), 
-                        color = if (isActive || fanSpeed > 0) roomColor.copy(0.15f) else Color.LightGray.copy(0.1f), 
+                        color = if (isActive || (device.type == "Fan" && fanSpeed > 0)) roomColor.copy(0.15f) else Color.LightGray.copy(0.1f), 
                         modifier = Modifier.size(48.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) { 
-                            Icon(icon, null, tint = if (isActive || fanSpeed > 0) roomColor else Color.Gray) 
+                            Icon(icon, null, tint = if (isActive || (device.type == "Fan" && fanSpeed > 0)) roomColor else Color.Gray)
                         }
                     }
                     Spacer(Modifier.width(16.dp))
@@ -570,7 +590,10 @@ fun DeviceControlCard(device: DeviceInfo, roomColor: Color) {
                 if (device.type != "Fan") {
                     Switch(
                         checked = isActive,
-                        onCheckedChange = { isActive = it },
+                        onCheckedChange = { 
+                            isActive = it
+                            deviceRef.setValue(if(it) 1 else 0)
+                        },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = roomColor,
                             checkedTrackColor = roomColor.copy(alpha = 0.5f)
@@ -588,9 +611,12 @@ fun DeviceControlCard(device: DeviceInfo, roomColor: Color) {
                     }
                     Slider(
                         value = fanSpeed,
-                        onValueChange = { fanSpeed = it },
+                        onValueChange = { 
+                            fanSpeed = it
+                            deviceRef.setValue(it.roundToInt())
+                        },
                         valueRange = 0f..100f,
-                        steps = 3, // 0, 25, 50, 75, 100
+                        steps = 3,
                         colors = SliderDefaults.colors(
                             thumbColor = roomColor,
                             activeTrackColor = roomColor,
@@ -598,9 +624,6 @@ fun DeviceControlCard(device: DeviceInfo, roomColor: Color) {
                         )
                     )
                 }
-            } else if (isActive) {
-                Spacer(Modifier.height(8.dp))
-                Text("Device is currently running", style = MaterialTheme.typography.labelSmall, color = roomColor.copy(alpha = 0.7f))
             }
         }
     }
@@ -608,7 +631,7 @@ fun DeviceControlCard(device: DeviceInfo, roomColor: Color) {
 
 @Composable
 fun BluetoothProvisioningDialog(onDismiss: () -> Unit) {
-    var step by remember { mutableIntStateOf(0) } // 0: Scanning, 1: Connecting, 2: WiFi Config, 3: Success
+    var step by remember { mutableIntStateOf(0) }
     var ssid by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var responseMsg by remember { mutableStateOf("") }
