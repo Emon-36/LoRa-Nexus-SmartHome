@@ -239,6 +239,7 @@ fun MainScreen() {
                         val newRoom = RoomStatus(name, 0, 0, "Newly added room", devices, color)
                         customRooms.add(newRoom)
                         
+                        // Initialize room and devices in Firebase
                         val database = FirebaseDatabase.getInstance("https://smarthome-b527c-default-rtdb.asia-southeast1.firebasedatabase.app")
                         val roomRef = database.getReference(name)
                         devices.forEach { device ->
@@ -259,6 +260,7 @@ fun MainScreen() {
                     room = room,
                     onBackClick = { navController.popBackStack() },
                     onDeleteRoom = {
+                        // Remove room from Firebase
                         val database = FirebaseDatabase.getInstance("https://smarthome-b527c-default-rtdb.asia-southeast1.firebasedatabase.app")
                         database.getReference(room.name).removeValue()
                         
@@ -350,7 +352,7 @@ fun HomeScreen(onMenuClick: () -> Unit, onAddRoom: (String, List<DeviceInfo>, Co
 @Composable
 fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color) -> Unit) {
     var roomName by remember { mutableStateOf("") }
-    val deviceNames = remember { mutableStateListOf(mutableStateOf(""), mutableStateOf(""), mutableStateOf("")) }
+    val deviceNames = remember { mutableStateListOf("", "", "") }
     val deviceTypes = remember { mutableStateListOf("Bulb", "Bulb", "Bulb") }
     
     val professionalColors = listOf(
@@ -396,12 +398,12 @@ fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color
                 HorizontalDivider()
                 Text("Device Config:", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
                 
-                deviceNames.forEachIndexed { index, nameState ->
+                deviceNames.forEachIndexed { index, name ->
                     Column(modifier = Modifier.fillMaxWidth().border(1.dp, Color.LightGray, RoundedCornerShape(8.dp)).padding(8.dp)) {
                         OutlinedTextField(
-                            value = nameState.value,
-                            onValueChange = { nameState.value = it },
-                            label = { Text("Device Name (e.g., Fan)") },
+                            value = name,
+                            onValueChange = { deviceNames[index] = it },
+                            label = { Text("Device ${index + 1} Name") },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
                         )
@@ -439,7 +441,7 @@ fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color
                 }
                 
                 IconButton(onClick = { 
-                    deviceNames.add(mutableStateOf(""))
+                    deviceNames.add("")
                     deviceTypes.add("Bulb")
                 }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                     Icon(Icons.Default.Add, contentDescription = "Add device", tint = MaterialTheme.colorScheme.primary)
@@ -449,8 +451,8 @@ fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color
         confirmButton = {
             Button(onClick = { 
                 if (roomName.isNotBlank()) {
-                    val finalDevices = deviceNames.mapIndexedNotNull { i, state ->
-                        if (state.value.isNotBlank()) DeviceInfo(state.value, deviceTypes[i]) else null
+                    val finalDevices = deviceNames.mapIndexedNotNull { i, name ->
+                        if (name.isNotBlank()) DeviceInfo(name, deviceTypes[i]) else null
                     }
                     onAdd(roomName, finalDevices, selectedColor) 
                 }
@@ -749,6 +751,7 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
                     }
                     3 -> {
                         Text("Device: ${try { selectedDevice?.name } catch(e: SecurityException) { "Selected" }}")
+                        Text("Provisioning Room: ${room.name}", fontWeight = FontWeight.Bold, color = room.color)
                         OutlinedTextField(value = ssid, onValueChange = { ssid = it }, label = { Text("Wi-Fi SSID") }, modifier = Modifier.fillMaxWidth())
                         OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Wi-Fi Password") }, modifier = Modifier.fillMaxWidth())
                         if (isOperating) CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
@@ -766,25 +769,26 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
                 Button(enabled = !isOperating && ssid.isNotBlank(), onClick = {
                     scope.launch {
                         isOperating = true
-                        statusMsg = "Connecting..."
+                        statusMsg = "Connecting to ESP32..."
                         val result = withContext(Dispatchers.IO) {
                             var socket: BluetoothSocket? = null
                             try {
                                 socket = selectedDevice?.createRfcommSocketToServiceRecord(SPP_UUID)
                                 socket?.connect()
-                                val devicesList = room.devices.joinToString(",") { "${it.name}:${it.type}" }
+                                val devicesList = room.devices.joinToString(",") { it.name }
+                                // Sending Room Name along with devices and WiFi credentials
                                 val payload = "ROOM:${room.name};DEVICES:$devicesList;SSID:$ssid;PASS:$password\n"
                                 socket?.outputStream?.write(payload.toByteArray())
                                 true
                             } catch (e: Exception) {
-                                Log.e("BT", "Error", e)
+                                Log.e("BT", "Error during Bluetooth transfer", e)
                                 false
                             } finally {
                                 try { socket?.close() } catch (e: Exception) {}
                             }
                         }
                         isOperating = false
-                        if (result) step = 4 else statusMsg = "Connection failed. Try again."
+                        if (result) step = 4 else statusMsg = "Connection failed. Ensure ESP32 is powered and in range."
                     }
                 }) { Text("Send Config") }
             } else if (step == 4) {

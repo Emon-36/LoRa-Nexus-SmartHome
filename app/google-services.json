@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "541060112494",
+    "firebase_url": "https://smarthome-b527c-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "smarthome-b527c",
+    "storage_bucket": "smarthome-b527c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:541060112494:android:750d677e001842ad9c867f",
+        "android_client_info": {
+          "package_name": "com.example.smarthome"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDJ6zfCvDSzp0UMAfYa_GMibM2dlL7uUWc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
