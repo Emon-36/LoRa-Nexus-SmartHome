@@ -1,10 +1,25 @@
 package com.example.smarthome
 
+import android.Manifest
+import android.annotation.SuppressLint
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothManager
+import android.bluetooth.BluetoothSocket
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -80,6 +95,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -102,13 +118,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.example.smarthome.ui.theme.SmartHomeTheme
 import com.google.firebase.database.FirebaseDatabase
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.IOException
+import java.util.UUID
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
@@ -218,7 +239,6 @@ fun MainScreen() {
                         val newRoom = RoomStatus(name, 0, 0, "Newly added room", devices, color)
                         customRooms.add(newRoom)
                         
-                        // Initialize room and devices in Firebase
                         val database = FirebaseDatabase.getInstance("https://smarthome-b527c-default-rtdb.asia-southeast1.firebasedatabase.app")
                         val roomRef = database.getReference(name)
                         devices.forEach { device ->
@@ -239,7 +259,6 @@ fun MainScreen() {
                     room = room,
                     onBackClick = { navController.popBackStack() },
                     onDeleteRoom = {
-                        // Remove room from Firebase
                         val database = FirebaseDatabase.getInstance("https://smarthome-b527c-default-rtdb.asia-southeast1.firebasedatabase.app")
                         database.getReference(room.name).removeValue()
                         
@@ -466,7 +485,7 @@ fun DynamicRoomScreen(room: RoomStatus, onBackClick: () -> Unit, onDeleteRoom: (
     }
 
     if (showBluetoothConfig) {
-        BluetoothProvisioningDialog(onDismiss = { showBluetoothConfig = false })
+        BluetoothProvisioningDialog(room = room, onDismiss = { showBluetoothConfig = false })
     }
 
     Scaffold(
@@ -553,7 +572,7 @@ fun DeviceControlCard(roomName: String, device: DeviceInfo, roomColor: Color) {
     val icon = when (device.type) {
         "Bulb" -> Icons.Default.Lightbulb
         "Fan" -> Icons.Default.Air
-        "Heater" -> Icons.Default.Bolt // Using Bolt for heater as representative
+        "Heater" -> Icons.Default.Bolt
         "AC" -> Icons.Default.AcUnit
         "TV" -> Icons.Default.Tv
         else -> Icons.Default.Devices
@@ -629,13 +648,59 @@ fun DeviceControlCard(roomName: String, device: DeviceInfo, roomColor: Color) {
     }
 }
 
+@SuppressLint("MissingPermission")
 @Composable
-fun BluetoothProvisioningDialog(onDismiss: () -> Unit) {
-    var step by remember { mutableIntStateOf(0) }
+fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
+    val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
+    val scope = rememberCoroutineScope()
+
+    var step by remember { mutableIntStateOf(0) } // 0: Permissions, 1: Scanning, 2: Device Selection, 3: WiFi Config, 4: Success
+    val foundDevices = remember { mutableStateListOf<BluetoothDevice>() }
+    var selectedDevice by remember { mutableStateOf<BluetoothDevice?>(null) }
+    
     var ssid by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var responseMsg by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
+    var statusMsg by remember { mutableStateOf("") }
+    var isOperating by remember { mutableStateOf(false) }
+
+    val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val granted = permissions.entries.all { it.value }
+        if (granted) step = 1 else Toast.makeText(context, "Permissions required", Toast.LENGTH_SHORT).show()
+    }
+
+    DisposableEffect(Unit) {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (BluetoothDevice.ACTION_FOUND == intent?.action) {
+                    val device: BluetoothDevice? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                    }
+                    device?.let { if (!foundDevices.contains(it)) foundDevices.add(it) }
+                }
+            }
+        }
+        context.registerReceiver(receiver, IntentFilter(BluetoothDevice.ACTION_FOUND))
+        onDispose { context.unregisterReceiver(receiver) }
+    }
+
+    LaunchedEffect(step) {
+        if (step == 1 && bluetoothAdapter != null) {
+            foundDevices.clear()
+            bluetoothAdapter.startDiscovery()
+            delay(10000)
+            bluetoothAdapter.cancelDiscovery()
+            if (foundDevices.isNotEmpty()) step = 2 else statusMsg = "No devices found. Try again."
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -643,74 +708,91 @@ fun BluetoothProvisioningDialog(onDismiss: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Bluetooth, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(8.dp))
-                Text("ESP32 Config")
+                Text("Bluetooth Provisioning")
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 when (step) {
                     0 -> {
-                        Text("Scanning for nearby ESP32 devices...")
-                        CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
-                        LaunchedEffect(Unit) {
-                            delay(2000)
-                            step = 1
-                        }
+                        Text("Need permissions to scan for ESP32.")
+                        Button(onClick = {
+                            val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                            } else {
+                                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
+                            }
+                            permissionLauncher.launch(permissions)
+                        }) { Text("Grant Permissions") }
                     }
                     1 -> {
-                        Text("Found: 'ESP32_Smart_Hub_01'")
-                        Text("Connecting...")
+                        Text("Searching for your Smart Hub...")
                         CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
-                        LaunchedEffect(Unit) {
-                            delay(1500)
-                            step = 2
-                        }
                     }
                     2 -> {
-                        Text("Connected! Provide Wi-Fi credentials:")
-                        OutlinedTextField(
-                            value = ssid,
-                            onValueChange = { ssid = it },
-                            label = { Text("Wi-Fi SSID") },
-                            leadingIcon = { Icon(Icons.Default.Wifi, null) },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        OutlinedTextField(
-                            value = password,
-                            onValueChange = { password = it },
-                            label = { Text("Wi-Fi Password") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        if (responseMsg.isNotEmpty()) {
-                            Text("ESP32 Response: $responseMsg", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                        Text("Select your ESP32 device:")
+                        LazyColumn(modifier = Modifier.height(200.dp)) {
+                            items(foundDevices) { device ->
+                                val name = try { device.name } catch(e: SecurityException) { null } ?: "Unknown Device"
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth().clickable { 
+                                        selectedDevice = device
+                                        step = 3
+                                    }.padding(vertical = 4.dp),
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                ) {
+                                    Text(name, modifier = Modifier.padding(12.dp))
+                                }
+                            }
                         }
                     }
                     3 -> {
+                        Text("Device: ${try { selectedDevice?.name } catch(e: SecurityException) { "Selected" }}")
+                        OutlinedTextField(value = ssid, onValueChange = { ssid = it }, label = { Text("Wi-Fi SSID") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Wi-Fi Password") }, modifier = Modifier.fillMaxWidth())
+                        if (isOperating) CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                        Text(statusMsg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                    }
+                    4 -> {
                         Icon(Icons.Default.Bolt, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(48.dp).align(Alignment.CenterHorizontally))
-                        Text("ESP32 Provisioned Successfully!", modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                        Text("Configuration sent successfully!", textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     }
                 }
             }
         },
         confirmButton = {
-            if (step == 2) {
-                Button(onClick = {
+            if (step == 3) {
+                Button(enabled = !isOperating && ssid.isNotBlank(), onClick = {
                     scope.launch {
-                        responseMsg = "Verifying..."
-                        delay(2000)
-                        responseMsg = "WiFi Connected. IP: 192.168.1.15"
-                        delay(1000)
-                        step = 3
+                        isOperating = true
+                        statusMsg = "Connecting..."
+                        val result = withContext(Dispatchers.IO) {
+                            var socket: BluetoothSocket? = null
+                            try {
+                                socket = selectedDevice?.createRfcommSocketToServiceRecord(SPP_UUID)
+                                socket?.connect()
+                                val devicesList = room.devices.joinToString(",") { "${it.name}:${it.type}" }
+                                val payload = "ROOM:${room.name};DEVICES:$devicesList;SSID:$ssid;PASS:$password\n"
+                                socket?.outputStream?.write(payload.toByteArray())
+                                true
+                            } catch (e: Exception) {
+                                Log.e("BT", "Error", e)
+                                false
+                            } finally {
+                                try { socket?.close() } catch (e: Exception) {}
+                            }
+                        }
+                        isOperating = false
+                        if (result) step = 4 else statusMsg = "Connection failed. Try again."
                     }
-                }) { Text("Send & Connect") }
-            } else if (step == 3) {
+                }) { Text("Send Config") }
+            } else if (step == 4) {
                 Button(onClick = onDismiss) { Text("Finish") }
             }
         },
         dismissButton = {
-            if (step < 3) {
-                TextButton(onClick = onDismiss) { Text("Cancel") }
-            }
+            if (step < 4) TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
 }
