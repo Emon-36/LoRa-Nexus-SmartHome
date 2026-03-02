@@ -8,7 +8,7 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:541060112494:android:750d677e001842ad9c867f",
+        "mobilesdk_app_id": "use your one",
         "android_client_info": {
           "package_name": "com.example.smarthome"
         }
@@ -16,7 +16,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDJ6zfCvDSzp0UMAfYa_GMibM2dlL7uUWc"
+          "current_key": "Your key"
         }
       ],
       "services": {
