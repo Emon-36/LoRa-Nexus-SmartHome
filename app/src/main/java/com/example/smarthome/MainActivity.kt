@@ -170,7 +170,7 @@ data class UsageStats(
 // Persistence Helper
 object RoomPreferences {
     private const val PREFS_NAME = "smart_home_prefs"
-    private const val ROOMS_KEY = "custom_rooms_v2"
+    private const val ROOMS_KEY = "custom_rooms_v3"
 
     fun saveRooms(context: Context, rooms: List<RoomStatus>) {
         val sharedPrefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -241,7 +241,6 @@ fun MainScreen() {
                         val newRoom = RoomStatus(name, 0, 0, "Newly added room", devices, color)
                         customRooms.add(newRoom)
                         
-                        // Initialize room and devices in Firebase
                         val database = FirebaseDatabase.getInstance("https://smarthome-b527c-default-rtdb.asia-southeast1.firebasedatabase.app")
                         val roomRef = database.getReference(name)
                         devices.forEach { device ->
@@ -262,7 +261,6 @@ fun MainScreen() {
                     room = room,
                     onBackClick = { navController.popBackStack() },
                     onDeleteRoom = {
-                        // Remove room from Firebase
                         val database = FirebaseDatabase.getInstance("https://smarthome-b527c-default-rtdb.asia-southeast1.firebasedatabase.app")
                         database.getReference(room.name).removeValue()
                         
@@ -664,7 +662,7 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
     val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
     val scope = rememberCoroutineScope()
 
-    var step by remember { mutableIntStateOf(0) } // 0: Permissions, 1: Scanning, 2: Device Selection, 3: Connecting, 4: Connected (WiFi Config), 5: Success
+    var step by remember { mutableIntStateOf(0) } // 0: Permissions, 1: Scanning, 2: Device Selection, 3: Handshake, 4: WiFi Config, 5: Success
     val foundDevices = remember { mutableStateListOf<BluetoothDevice>() }
     var selectedDevice by remember { mutableStateOf<BluetoothDevice?>(null) }
     var bluetoothSocket by remember { mutableStateOf<BluetoothSocket?>(null) }
@@ -783,12 +781,12 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
                                         false
                                     }
                                 } catch (e: Exception) {
-                                    Log.e("SmartHomeBT", "Connection/Handshake error", e)
+                                    Log.e("SmartHomeBT", "Handshake error", e)
                                     false
                                 }
                             }
                             if (verified) step = 4 else {
-                                statusMsg = "ESP32 Handshake failed. Ensure ESP32 is ready."
+                                statusMsg = "Handshake failed. Ensure ESP32 is ready."
                                 step = 2
                             }
                         }
@@ -836,7 +834,7 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
                 Button(enabled = !isOperating && ssid.isNotBlank(), onClick = {
                     scope.launch {
                         isOperating = true
-                        statusMsg = "Sending data..."
+                        statusMsg = "Sending config..."
                         val success = withContext(Dispatchers.IO) {
                             try {
                                 val devicesList = room.devices.joinToString(",") { it.name }
@@ -844,9 +842,7 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
                                 bluetoothSocket?.outputStream?.write(payload.toByteArray())
                                 bluetoothSocket?.outputStream?.flush()
                                 true
-                            } catch (e: Exception) {
-                                false
-                            }
+                            } catch (e: Exception) { false }
                         }
                         isOperating = false
                         if (success) step = 5 else statusMsg = "Send failed. Connection lost?"
