@@ -50,6 +50,7 @@ import androidx.compose.material.icons.filled.AcUnit
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Devices
@@ -662,9 +663,10 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
     val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
     val scope = rememberCoroutineScope()
 
-    var step by remember { mutableIntStateOf(0) } // 0: Permissions, 1: Scanning, 2: Device Selection, 3: WiFi Config, 4: Success
+    var step by remember { mutableIntStateOf(0) } // 0: Permissions, 1: Scanning, 2: Device Selection, 3: Connecting, 4: Connected (WiFi Config), 5: Success
     val foundDevices = remember { mutableStateListOf<BluetoothDevice>() }
     var selectedDevice by remember { mutableStateOf<BluetoothDevice?>(null) }
+    var bluetoothSocket by remember { mutableStateOf<BluetoothSocket?>(null) }
     
     var ssid by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -695,7 +697,10 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
             }
         }
         context.registerReceiver(receiver, IntentFilter(BluetoothDevice.ACTION_FOUND))
-        onDispose { context.unregisterReceiver(receiver) }
+        onDispose { 
+            context.unregisterReceiver(receiver) 
+            try { bluetoothSocket?.close() } catch (e: Exception) {}
+        }
     }
 
     LaunchedEffect(step) {
@@ -712,9 +717,13 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Bluetooth, null, tint = MaterialTheme.colorScheme.primary)
+                Icon(
+                    imageVector = if (step >= 4) Icons.Default.BluetoothConnected else Icons.Default.Bluetooth, 
+                    contentDescription = null, 
+                    tint = if (step >= 4) Color(0xFF4CAF50) else MaterialTheme.colorScheme.primary
+                )
                 Spacer(Modifier.width(8.dp))
-                Text("Bluetooth Provisioning")
+                Text(if (step >= 4) "ESP32 Connected" else "Bluetooth Setup")
             }
         },
         text = {
@@ -736,7 +745,7 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
                         CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
                     }
                     2 -> {
-                        Text("Select your ESP32 device:")
+                        Text("Select your ESP32 device to connect:")
                         LazyColumn(modifier = Modifier.height(200.dp)) {
                             items(foundDevices) { device ->
                                 val name = try { device.name } catch(e: SecurityException) { null } ?: "Unknown Device"
@@ -754,60 +763,68 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
                         }
                     }
                     3 -> {
-                        Text("Device: ${try { selectedDevice?.name } catch(e: SecurityException) { "Selected" }}")
-                        Text("Provisioning Room: ${room.name}", fontWeight = FontWeight.Bold, color = room.color)
-                        OutlinedTextField(value = ssid, onValueChange = { ssid = it }, label = { Text("Wi-Fi SSID") }, modifier = Modifier.fillMaxWidth())
+                        Text("Connecting to ${try { selectedDevice?.name } catch(e: SecurityException) { "Device" }}...")
+                        CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                        LaunchedEffect(Unit) {
+                            val connected = withContext(Dispatchers.IO) {
+                                try {
+                                    bluetoothAdapter?.cancelDiscovery()
+                                    val socket = selectedDevice?.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
+                                    socket?.connect()
+                                    bluetoothSocket = socket
+                                    true
+                                } catch (e: Exception) {
+                                    Log.e("SmartHomeBT", "Connection error", e)
+                                    false
+                                }
+                            }
+                            if (connected) step = 4 else {
+                                statusMsg = "Connection failed. Please retry."
+                                step = 2
+                            }
+                        }
+                    }
+                    4 -> {
+                        Text("ESP32 Ready! Provide Wi-Fi credentials for ${room.name}:", fontWeight = FontWeight.Medium)
+                        OutlinedTextField(value = ssid, onValueChange = { ssid = it }, label = { Text("Wi-Fi SSID") }, leadingIcon = { Icon(Icons.Default.Wifi, null) }, modifier = Modifier.fillMaxWidth())
                         OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Wi-Fi Password") }, modifier = Modifier.fillMaxWidth())
                         if (isOperating) CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
                         Text(statusMsg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
-                    4 -> {
+                    5 -> {
                         Icon(Icons.Default.Bolt, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(48.dp).align(Alignment.CenterHorizontally))
-                        Text("Configuration sent successfully!", textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                        Text("Config sent! ESP32 will reboot.", textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.fillMaxWidth())
                     }
                 }
             }
         },
         confirmButton = {
-            if (step == 3) {
+            if (step == 4) {
                 Button(enabled = !isOperating && ssid.isNotBlank(), onClick = {
                     scope.launch {
                         isOperating = true
-                        statusMsg = "Connecting to ESP32..."
-                        val result = withContext(Dispatchers.IO) {
-                            var socket: BluetoothSocket? = null
+                        statusMsg = "Sending data..."
+                        val success = withContext(Dispatchers.IO) {
                             try {
-                                // Cancel discovery before connecting
-                                bluetoothAdapter?.cancelDiscovery()
-                                
-                                // Use insecure socket for better compatibility with ESP32
-                                socket = selectedDevice?.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
-                                socket?.connect()
-                                
                                 val devicesList = room.devices.joinToString(",") { it.name }
                                 val payload = "ROOM:${room.name};DEVICES:$devicesList;SSID:$ssid;PASS:$password\n"
-                                
-                                Log.d("SmartHomeBT", "Sending Payload: $payload")
-                                socket?.outputStream?.write(payload.toByteArray())
-                                socket?.outputStream?.flush()
+                                bluetoothSocket?.outputStream?.write(payload.toByteArray())
+                                bluetoothSocket?.outputStream?.flush()
                                 true
                             } catch (e: Exception) {
-                                Log.e("SmartHomeBT", "Bluetooth transfer error", e)
                                 false
-                            } finally {
-                                try { socket?.close() } catch (e: Exception) {}
                             }
                         }
                         isOperating = false
-                        if (result) step = 4 else statusMsg = "Connection failed. Check Logcat."
+                        if (success) step = 5 else statusMsg = "Send failed. Connection lost?"
                     }
                 }) { Text("Send Config") }
-            } else if (step == 4) {
+            } else if (step == 5) {
                 Button(onClick = onDismiss) { Text("Finish") }
             }
         },
         dismissButton = {
-            if (step < 4) TextButton(onClick = onDismiss) { Text("Cancel") }
+            if (step < 5) TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
 }
