@@ -352,7 +352,7 @@ fun HomeScreen(onMenuClick: () -> Unit, onAddRoom: (String, List<DeviceInfo>, Co
 @Composable
 fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color) -> Unit) {
     var roomName by remember { mutableStateOf("") }
-    val deviceNames = remember { mutableStateListOf("", "", "") }
+    val deviceNames = remember { mutableStateListOf(mutableStateOf(""), mutableStateOf(""), mutableStateOf("")) }
     val deviceTypes = remember { mutableStateListOf("Bulb", "Bulb", "Bulb") }
     
     val professionalColors = listOf(
@@ -398,11 +398,11 @@ fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color
                 HorizontalDivider()
                 Text("Device Config:", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.secondary)
                 
-                deviceNames.forEachIndexed { index, name ->
+                deviceNames.forEachIndexed { index, nameState ->
                     Column(modifier = Modifier.fillMaxWidth().border(1.dp, Color.LightGray, RoundedCornerShape(8.dp)).padding(8.dp)) {
                         OutlinedTextField(
-                            value = name,
-                            onValueChange = { deviceNames[index] = it },
+                            value = nameState.value,
+                            onValueChange = { nameState.value = it },
                             label = { Text("Device ${index + 1} Name") },
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp)
@@ -441,7 +441,7 @@ fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color
                 }
                 
                 IconButton(onClick = { 
-                    deviceNames.add("")
+                    deviceNames.add(mutableStateOf(""))
                     deviceTypes.add("Bulb")
                 }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                     Icon(Icons.Default.Add, contentDescription = "Add device", tint = MaterialTheme.colorScheme.primary)
@@ -451,8 +451,8 @@ fun AddRoomDialog(onDismiss: () -> Unit, onAdd: (String, List<DeviceInfo>, Color
         confirmButton = {
             Button(onClick = { 
                 if (roomName.isNotBlank()) {
-                    val finalDevices = deviceNames.mapIndexedNotNull { i, name ->
-                        if (name.isNotBlank()) DeviceInfo(name, deviceTypes[i]) else null
+                    val finalDevices = deviceNames.mapIndexedNotNull { i, state ->
+                        if (state.value.isNotBlank()) DeviceInfo(state.value, deviceTypes[i]) else null
                     }
                     onAdd(roomName, finalDevices, selectedColor) 
                 }
@@ -613,7 +613,9 @@ fun DeviceControlCard(roomName: String, device: DeviceInfo, roomColor: Color) {
                         checked = isActive,
                         onCheckedChange = { 
                             isActive = it
-                            deviceRef.setValue(if(it) 1 else 0)
+                            val value = if(it) 1 else 0
+                            Log.d("SmartHome", "Room: $roomName | Device: ${device.name} | Value: $value")
+                            deviceRef.setValue(value)
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = roomColor,
@@ -634,7 +636,9 @@ fun DeviceControlCard(roomName: String, device: DeviceInfo, roomColor: Color) {
                         value = fanSpeed,
                         onValueChange = { 
                             fanSpeed = it
-                            deviceRef.setValue(it.roundToInt())
+                            val speed = it.roundToInt()
+                            Log.d("SmartHome", "Room: $roomName | Device: ${device.name} | Speed: $speed")
+                            deviceRef.setValue(speed)
                         },
                         valueRange = 0f..100f,
                         steps = 3,
@@ -773,22 +777,29 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
                         val result = withContext(Dispatchers.IO) {
                             var socket: BluetoothSocket? = null
                             try {
-                                socket = selectedDevice?.createRfcommSocketToServiceRecord(SPP_UUID)
+                                // Cancel discovery before connecting
+                                bluetoothAdapter?.cancelDiscovery()
+                                
+                                // Use insecure socket for better compatibility with ESP32
+                                socket = selectedDevice?.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
                                 socket?.connect()
+                                
                                 val devicesList = room.devices.joinToString(",") { it.name }
-                                // Sending Room Name along with devices and WiFi credentials
                                 val payload = "ROOM:${room.name};DEVICES:$devicesList;SSID:$ssid;PASS:$password\n"
+                                
+                                Log.d("SmartHomeBT", "Sending Payload: $payload")
                                 socket?.outputStream?.write(payload.toByteArray())
+                                socket?.outputStream?.flush()
                                 true
                             } catch (e: Exception) {
-                                Log.e("BT", "Error during Bluetooth transfer", e)
+                                Log.e("SmartHomeBT", "Bluetooth transfer error", e)
                                 false
                             } finally {
                                 try { socket?.close() } catch (e: Exception) {}
                             }
                         }
                         isOperating = false
-                        if (result) step = 4 else statusMsg = "Connection failed. Ensure ESP32 is powered and in range."
+                        if (result) step = 4 else statusMsg = "Connection failed. Check Logcat."
                     }
                 }) { Text("Send Config") }
             } else if (step == 4) {
