@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lightbulb
@@ -763,23 +764,31 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
                         }
                     }
                     3 -> {
-                        Text("Connecting to ${try { selectedDevice?.name } catch(e: SecurityException) { "Device" }}...")
+                        Text("Connecting & Verifying ESP32...")
                         CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
                         LaunchedEffect(Unit) {
-                            val connected = withContext(Dispatchers.IO) {
+                            val verified = withContext(Dispatchers.IO) {
                                 try {
                                     bluetoothAdapter?.cancelDiscovery()
                                     val socket = selectedDevice?.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
                                     socket?.connect()
-                                    bluetoothSocket = socket
-                                    true
+                                    
+                                    val reader = socket?.inputStream?.bufferedReader()
+                                    val response = reader?.readLine()
+                                    if (response?.trim() == "READY") {
+                                        bluetoothSocket = socket
+                                        true
+                                    } else {
+                                        socket?.close()
+                                        false
+                                    }
                                 } catch (e: Exception) {
-                                    Log.e("SmartHomeBT", "Connection error", e)
+                                    Log.e("SmartHomeBT", "Connection/Handshake error", e)
                                     false
                                 }
                             }
-                            if (connected) step = 4 else {
-                                statusMsg = "Connection failed. Please retry."
+                            if (verified) step = 4 else {
+                                statusMsg = "ESP32 Handshake failed. Ensure ESP32 is ready."
                                 step = 2
                             }
                         }
@@ -790,6 +799,30 @@ fun BluetoothProvisioningDialog(room: RoomStatus, onDismiss: () -> Unit) {
                         OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Wi-Fi Password") }, modifier = Modifier.fillMaxWidth())
                         if (isOperating) CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
                         Text(statusMsg, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                        
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    val success = withContext(Dispatchers.IO) {
+                                        try {
+                                            bluetoothSocket?.outputStream?.write("RESET\n".toByteArray())
+                                            bluetoothSocket?.outputStream?.flush()
+                                            true
+                                        } catch (e: Exception) { false }
+                                    }
+                                    if (success) {
+                                        Toast.makeText(context, "Reset command sent", Toast.LENGTH_SHORT).show()
+                                        onDismiss()
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.DeleteForever, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Reset ESP32 Credentials")
+                        }
                     }
                     5 -> {
                         Icon(Icons.Default.Bolt, null, tint = Color(0xFF4CAF50), modifier = Modifier.size(48.dp).align(Alignment.CenterHorizontally))
