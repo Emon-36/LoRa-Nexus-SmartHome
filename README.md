@@ -1,6 +1,8 @@
 # 🏠 Smart Hub Pro - Hybrid IoT Home Automation
 
-A professional-grade Home Automation system featuring a hybrid communication architecture. Control your home devices seamlessly through a **Modern Android App**, **Firebase Realtime Database**, and **Long-Range (LoRa) Wireless Remotes**.
+<img src="https://img.shields.io/badge/Status-Complete-3DDC84?style=flat-square"/> <img src="https://img.shields.io/badge/Stack-ESP32%20%7C%20Firebase%20%7C%20Jetpack%20Compose-4285F4?style=flat-square"/>
+
+A professional-grade Home Automation system featuring a hybrid communication architecture. Control your home devices seamlessly through a **Modern Android App**, **Firebase Realtime Database**, and **Long-Range (LoRa) Wireless Remotes (for offline control)**.
 
 ---
 
@@ -17,7 +19,7 @@ A professional-grade Home Automation system featuring a hybrid communication arc
 
 ---
 
-## 🛠 Circuit Diagram (Estimated)
+## 🛠 Circuit Diagram
 
 ### 1. Central Hub (Receiver)
 The Central Hub acts as the bridge between your phone, the internet, and the physical relays.
@@ -64,6 +66,3 @@ A portable remote for local offline control.
     *   `Esp_transmitter_LoRa.ino`: The remote control logic.
 
 ---
-
-## ⚖️ License
-This project is for educational and DIY purposes. Ensure proper electrical safety precautions when working with high-voltage relays.
