@@ -991,7 +991,3 @@ fun StatusRow(icon: ImageVector, text: String) {
         Text(text, style = MaterialTheme.typography.bodySmall)
     }
 }
-
-@Preview(showSystemUi = true)
-@Composable
-fun AppPreview() { SmartHomeTheme { MainScreen() } }
